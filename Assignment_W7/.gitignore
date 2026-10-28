@@ -1,0 +1,9 @@
+node_modules/
+.env
+*.log
+
+# TLS Certificates — NEVER commit private keys
+localhost.pem
+localhost-key.pem
+*.pem
+*.key
