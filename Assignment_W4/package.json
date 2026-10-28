@@ -1,0 +1,19 @@
+{
+  "name": "task-management-api",
+  "version": "1.0.0",
+  "description": "Task Management REST API - Week 4 Assignment (Richardson Maturity Model Evaluation)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "author": "Aayush Kathiriya",
+  "license": "MIT"
+}
