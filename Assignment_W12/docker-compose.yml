@@ -1,0 +1,141 @@
+﻿# docker-compose.yml — Blue-Green Deployment Simulation
+# Week 12: Zero-Downtime Deployment with Docker Compose
+# Author: Aayush Kathiriya
+# Course: ITUE301 — Advanced Web Development Frameworks
+#
+# Architecture:
+#   backend-blue  → port 5000 (ACTIVE / live traffic)
+#   backend-green → port 5001 (STANDBY / new version under test)
+#   mongo         → port 27017 (shared data layer)
+#
+# Traffic switch procedure:
+#   1. Verify green is healthy: curl http://localhost:5001/version
+#   2. Update nginx/blue-green.conf: change upstream to backend-green:5000
+#   3. docker-compose exec nginx nginx -s reload   (zero-downtime reload)
+#   4. Verify: curl http://localhost:8080/version  → {"version":"green"}
+#   5. Stop blue: docker-compose stop backend-blue
+
+version: "3.9"
+
+networks:
+  tasknet:
+    driver: bridge
+
+volumes:
+  mongo-data:
+    driver: local
+
+services:
+
+  # ── BLUE: Current stable production version ─────────────────────────────────
+  backend-blue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: task-backend-blue
+    image: task-api:blue
+    restart: unless-stopped
+    ports:
+      - "5000:5000"        # ACTIVE — live traffic on port 5000
+    environment:
+      - VERSION=blue
+      - PORT=5000
+      - NODE_ENV=production
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - tasknet
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/version', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.50
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ── GREEN: New version under test before traffic switch ─────────────────────
+  backend-green:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: task-backend-green
+    image: task-api:green
+    restart: unless-stopped
+    ports:
+      - "5001:5000"        # STANDBY — internal test traffic on port 5001
+    environment:
+      - VERSION=green
+      - PORT=5000
+      - NODE_ENV=production
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - tasknet
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/version', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.50
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ── NGINX: Reverse proxy / traffic switch point ──────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: task-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"          # Public entry point — currently routes to BLUE
+    volumes:
+      - ./nginx/blue-green.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend-blue
+      - backend-green
+    networks:
+      - tasknet
+
+  # ── MONGODB: Shared data layer ───────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0-jammy
+    container_name: task-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - tasknet
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.00
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
