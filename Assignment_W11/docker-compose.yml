@@ -1,0 +1,108 @@
+﻿# docker-compose.yml — Task Management API (Week 11: Resource Limits)
+# Author: Aayush Kathiriya
+# Course: ITUE301 — Advanced Web Development Frameworks
+#
+# Resource limits are applied TWO ways for maximum compatibility:
+#   1. Top-level keys (mem_limit, cpus) — works with plain `docker-compose up`
+#   2. deploy.resources              — works with `docker stack deploy` (Swarm mode)
+#
+# Usage:
+#   docker-compose up --build -d    # start stack
+#   docker stats                     # verify limits
+#   docker-compose down              # stop stack
+
+version: "3.9"
+
+networks:
+  tasknet:
+    driver: bridge
+
+volumes:
+  mongo-data:
+    driver: local
+
+services:
+
+  # ── Backend: Task Management API ─────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: task-backend
+    image: task-api:w11
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=mongodb://mongo:27017/taskdb
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - tasknet
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    # ── Resource Limits (standalone docker-compose, no Swarm) ─────────────
+    # Applied by the Docker daemon via cgroups:
+    #   mem_limit:    hard memory ceiling — OOM kill if exceeded
+    #   memswap_limit: equal to mem_limit disables swap
+    #   cpus:         fraction of a CPU core (0.50 = 50% of 1 core)
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.50
+
+    # ── Resource Limits (Swarm mode / docker stack deploy) ────────────────
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # ── MongoDB: Database ─────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0-jammy
+    container_name: task-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - tasknet
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+    # MongoDB resource limits (generous — DB needs headroom)
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.00
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.50"
+          memory: 256M

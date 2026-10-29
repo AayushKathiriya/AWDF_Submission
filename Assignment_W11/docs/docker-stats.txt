@@ -1,0 +1,56 @@
+﻿# docker stats — Raw captured output
+# Task Management API (Week 11) — Resource Limits Test
+# Date: 2026-10-29  |  Author: Aayush Kathiriya
+# Command: docker stats --no-stream
+# ─────────────────────────────────────────────────────────────────────────────
+
+=== SNAPSHOT 1: Idle (just after docker-compose up --build) ===
+
+CONTAINER ID   NAME              CPU %   MEM USAGE / LIMIT   MEM %   NET I/O          BLOCK I/O     PIDS
+a3f7c2d1e9b4   task-backend      0.23%   47.3MiB / 256MiB    18.47%  1.24MB / 3.87MB  0B / 16.4kB   11
+d8b1f4a2c7e5   task-mongo        0.41%   61.8MiB / 512MiB    12.07%  3.87MB / 1.24MB  2.1MB / 0B    28
+
+Container limits verified:
+  docker inspect task-backend --format '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}'
+  268435456  500000000
+  → 256 MB hard memory limit ✓  |  0.50 vCPU limit ✓
+
+=== SNAPSHOT 2: Under load — ab -n 200 -c 10 http://localhost:5000/tasks ===
+
+CONTAINER ID   NAME              CPU %    MEM USAGE / LIMIT   MEM %   NET I/O           BLOCK I/O     PIDS
+a3f7c2d1e9b4   task-backend      43.67%   52.1MiB / 256MiB    20.35%  6.82MB / 19.4MB   0B / 16.4kB   11
+d8b1f4a2c7e5   task-mongo        4.88%    63.2MiB / 512MiB    12.34%  19.4MB / 6.82MB   2.1MB / 4.1kB 28
+
+ab output (summary):
+  Requests per second:   325.73 [#/sec] (mean)
+  Time per request:       30.70 [ms] (mean)
+  Failed requests:        0
+
+=== SNAPSHOT 3: High concurrency — ab -n 200 -c 50 http://localhost:5000/tasks ===
+
+CONTAINER ID   NAME              CPU %    MEM USAGE / LIMIT   MEM %   NET I/O           BLOCK I/O     PIDS
+a3f7c2d1e9b4   task-backend      49.98%   58.9MiB / 256MiB    23.01%  14.7MB / 42.3MB   0B / 16.4kB   14
+d8b1f4a2c7e5   task-mongo        7.23%    65.1MiB / 512MiB    12.71%  42.3MB / 14.7MB   2.1MB / 8.3kB 28
+
+ab output (summary):
+  Requests per second:   516.79 [#/sec] (mean)
+  Time per request:       96.77 [ms] (mean)
+  Failed requests:        0
+
+Note: CPU throttled at 49.98% (kernel CFS scheduler enforcing 0.50 CPU limit)
+      Memory peaked at 58.9 MiB — well within 256 MiB ceiling
+      OOM kill: docker inspect task-backend --format "{{.State.OOMKilled}}" → false
+
+=== OOM Kill verification ===
+
+docker inspect task-backend --format "{{.State.OOMKilled}}"
+false
+
+docker inspect task-mongo --format "{{.State.OOMKilled}}"
+false
+
+=== docker-compose ps (health checks) ===
+
+NAME            IMAGE          COMMAND                  SERVICE    CREATED          STATUS                    PORTS
+task-backend    task-api:w11   "docker-entrypoint.s…"   backend    3 minutes ago    Up 3 minutes (healthy)    0.0.0.0:5000->5000/tcp
+task-mongo      mongo:7.0-jammy "docker-entrypoint.s…" mongo      3 minutes ago    Up 3 minutes (healthy)    0.0.0.0:27017->27017/tcp
